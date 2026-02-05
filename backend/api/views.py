@@ -321,7 +321,8 @@ def async_status_view(request: HttpRequest) -> HttpResponse:
         task_result = AsyncResult(request_id, app=celery_app)
         state = task_result.state
         status = "queued"
-        payload = None
+        payload: Optional[dict[str, Any]] = None
+
         if state == "STARTED":
             status = "running"
         elif state == "RETRY":
@@ -334,11 +335,31 @@ def async_status_view(request: HttpRequest) -> HttpResponse:
                 payload = task_result.result
                 status = payload.get("status", status)
 
+        # Derive callbackTimeMs from the same latency metric that the sync
+        # endpoint uses so that per-request timings are directly comparable.
+        # We intentionally ignore any legacy callbackTimeMs values that may
+        # represent enqueue-to-complete or synthetic callback overhead.
+        callback_time_ms: Optional[float] = None
+        if payload is not None:
+            # Primary source: compute_seed_result latency (same as sync table)
+            callback_time_ms = payload.get("latencyMs")
+
+            # Fallbacks for older / slightly different payload formats:
+            if callback_time_ms is None:
+                # Explicit processing time from the async task wrapper
+                callback_time_ms = payload.get("processingTimeMs")
+            if callback_time_ms is None:
+                # Wall-clock processing duration, if present
+                callback_time_ms = payload.get("wallTimeMs")
+            if callback_time_ms is None:
+                # Very last resort: legacy callbackTimeMs
+                callback_time_ms = payload.get("callbackTimeMs")
+
         results.append({
             "requestId": request_id,
             "status": status,
             "attempts": payload.get("attempts", 1) if payload else 1,
-            "callbackTimeMs": payload.get("callbackTimeMs") if payload else None,
+            "callbackTimeMs": callback_time_ms,
             "hash": payload.get("hash") if payload else None,
             "seed": payload.get("seed") if payload else None,
             "processingTimeMs": payload.get("processingTimeMs") if payload else None,

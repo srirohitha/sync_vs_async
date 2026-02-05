@@ -43,6 +43,7 @@ def process_seed_task(
 
     wall_ms = (time.perf_counter() - wall_start) * 1000
     completed_at_ms = int(time.time() * 1000)
+    latency_ms = result.get("latencyMs")
 
     queue_time_ms = (
         max(0, started_at_ms - enqueued_at_ms) if enqueued_at_ms is not None else None
@@ -54,8 +55,10 @@ def process_seed_task(
     payload: dict[str, Any] = {
         **result,
         "attempts": self.request.retries + 1,
-        "processingTimeMs": round(wall_ms, 2),
-        "wallTimeMs": round(wall_ms, 2),
+        # Use the same latency metric as sync (`latencyMs`) so per-request
+        # timings match across sync/async. Fall back to wall_ms if needed.
+        "processingTimeMs": latency_ms if latency_ms is not None else round(wall_ms, 2),
+        "wallTimeMs": latency_ms if latency_ms is not None else round(wall_ms, 2),
         "queueTimeMs": round(queue_time_ms, 2) if queue_time_ms is not None else None,
         "totalTimeMs": round(total_time_ms, 2) if total_time_ms is not None else None,
         "enqueuedAtMs": enqueued_at_ms,
